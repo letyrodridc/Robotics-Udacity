@@ -242,19 +242,275 @@ T_end = simplify(T0_end * R_corr)
 	
 #### 3. Decouple Inverse Kinematics problem into Inverse Position Kinematics and inverse Orientation Kinematics; doing so derive the equations to calculate all individual joint angles.
 
-And here's where you can draw out and show your math for the derivation of your theta angles. 
+*Spherical wrist: Finding the wrist center* 
 
-![alt text][image2]
+The 3 last joints: joint4, joint5, and joint6 intersect in the same point. That constitutes a *_spherical wrist_*.
+
+The first thing that we need to find in the wrist center _WC_.
+
+According to the lesson: , we can use the following formula.
+
+_wx_ = _px_ - (_d6_+_l_) \* _n\_x_
+
+_wy_ = _py_ - (_d6_+_l_) \* _n\_y_
+
+_wz_ = _pz_ - (_d6_+_l_) \* _n\_z_
+
+where:
+* _px_, _py_, _pz_  it's the current coordinates. The pose that is received from the simulator, ROS. 
+
+* _d6_ corresponds to joint\_6 link offset. I can search the value in the DH_Table. It's 0.
+
+* _l_ end-effector length _d7_ in DH Table. From joint\_6 to the end of the finger in the gripper. It's value is 0.303 according to the xacro ant table.
+
+* _n\_x_, _n\_y_, _n\_z_ Needs to be calculated and I can use the rotation matrix to do it.
+
+The pose position is given in _quaternions_ (x,y,z,w). 
+
+*Calculating _n\_x_, _n\_y_, _n\_z_ using Rotation Composition*
+
+I will generate the rotation matrix using this formula:
+
+_Rrpy_ = _Rotz(yaw)_ \* _Roty(pitch)_  \* _Roty(roll)_ \* _Rcorr_
+
+
+The rotation matrices are defined this way:
+
+
+```
+Rotz(Ɵ) =  [  [ cos(Ɵ), -sin(Ɵ),        0],
+              [ sin(Ɵ),  cos(Ɵ),        0],
+              [      0,       0,        1]]  
+```
+
+
+```
+Roty(Ɵ) =  [  [  cos(Ɵ),  0,   sin(Ɵ)],
+              [       0,  1,        0],
+              [ -sin(Ɵ),  0,   cos(Ɵ)]] 
+```
+
+
+```
+Rotx(Ɵ) =  [  [ 1,         0,       0],
+              [ 0,    cos(Ɵ), -sin(Ɵ)],
+              [ 0,    sin(Ɵ),  cos(Ɵ)]]  
+```
+
+_Rcorr_ is the correction from transforming xacro to DH standars.
+
+```
+_Rcorr_ = Rotz(π) * Roty(-π/2)
+```
+
+Notice that we don't have the values of roll, pitch, and yaw. I need to convert the quaternion to euler angles. To do that, I will use a function `euler\_from\_quaternion(x,y,z,w)` provided in TF package.
+
+
+*Inverse Position Kinematics*
+
+In this part, I'm going to find Ɵ1, Ɵ2, and Ɵ3 rotations angles for joints 1, 2, and 3.
+
+I'm going to build a triangle between joint2, joint3, and the WC (joint5) and label the sides and angles.
+
+![IK](misc_images/IK_pic.gif)
+
+First, I will calculate all the sides and the all the angles. 
+
+To calculate the sides:
+
+A = Distance joint 3 to WC. It's d4=1.5
+
+B = I will use pitagoras to calculate the line that goes from the base to the WC. 
+    `(sqrt(WC[0]\*WC[0] + WC[1]\*WC[1])` and I will take it off the distance to the first from the ground to the first joint in Y (d1)
+    The distance from the origin in z WC[2] minus a1 (location of the first joint in X)
+
+C = Distance between joint 2 and 3. That's a2 in the DH table = 1.25
+
+To calculate the angles, I will use the Cosine formula:
+
+```
+C = sqrt(A²+B²-2*A*B*cos(Ɵ))
+```
+
+*_Theta1_*
+
+Theta 1 is the angle from x to y. I can use arctan2 to calculate it.
+
+```
+theta1 = arctan2(y,x)
+```
+
+
+*_Theta2_*
+
+```
+theta2 = pi / 2 - angle_a - angle_from_x_to_y changing coordinates frame to joint 2
+```
+
+The joint 2 coordinates frame is in a1, d1 and that's 0.35,0.75.
+
+I need the angle of a point x1, y1 that the point of WC in the new coordinates frame. 
+
+
+*_Theta3_*
+
+```
+theta3 = pi / 2 - angle_b + small_part_that_takes_to_x_axis
+```
+
+One side: -0.054m and the other: side_a=1.5
+I can use arctan2 to calculate the small angle between x axis.
+
+```
+>>> np.arctan2(-0.054,1.5)
+-0.035984460082051591
+```
+
+```
+theta3 = pi / 2 - angle_b - 0.036
+```
+
+
+
+*Inverse Orientation Kinematics*
+
+
+* Find transformation matrix
+
+I will calculate from the pose of moving the first 3 joints. To do that, I will calculate the transformation matrix 0T3.
+
+```
+0T3 = 3T2 \* 2T1 \* 1T0 
+```
+
+This transformation matrix contains the pose. 
+
+```
+0T3 = [[r11, r12, r13, px]
+       [r21, r22, r23, py]
+       [r31, r32, r33, pz]
+       [  0,   0,   0,  1]
+      ]
+```
+
+* Find rotation matrix
+
+```
+ 3R6 = inv(0R3) * 0R6 = 0R3.T * 0R6 = 0R3.T * Rrpy
+```
+
+
+*_Theta4_*
+The position of the revolute rotates x and z. 
+
+
+*_Theta5_*
+The position of the revolute rotates x and y. 
+
+
+*_Theta6_*
+The position of the revolute rotates x and z. 
 
 ### Project Implementation
 
 #### 1. Fill in the `IK_server.py` file with properly commented python code for calculating Inverse Kinematics based on previously performed Kinematic Analysis. Your code must guide the robot to successfully complete 8/10 pick and place cycles. Briefly discuss the code you implemented and your results. 
 
 
-Here I'll talk about the code, what techniques I used, what worked and why, where the implementation might fail and how I might improve it if I were going to pursue this project further.  
+* Gets the WC position
+
+```            
+            px = req.poses[x].position.x
+            py = req.poses[x].position.y
+            pz = req.poses[x].position.z
+
+```
 
 
-And just for fun, another example image:
-![alt text][image3]
+* Converts the quaternion to euler angles
+```
+            (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(
+                [req.poses[x].orientation.x, req.poses[x].orientation.y,
+                    req.poses[x].orientation.z, req.poses[x].orientation.w])
 
+```
+
+
+* I'm going to build the rotation matrix. I will use it to calculate the WC wrist center.
+
+```
+            r,p,y = symbols('r p y')
+
+            ROT_x = rot_x(r)    # roll
+            ROT_y = rot_y(p)    # pitch
+            ROT_z = rot_z(y)    # yaw
+
+            ROT_EE = ROT_z * ROT_y * ROT_x
+```
+
+* I need to apply a correction error because DH Table uses another standard.
+
+            Rot_error = ROT_z.subs(y, radians(180)) * ROT_y.subs(p, radians(-90))
+
+            ROT_EE = ROT_EE * Rot_error  #compenstate for error
+            ROT_EE = ROT_EE.subs({'r': roll, 'p': pitch, 'y': yaw})
+
+* Calculates the WC
+
+As I've said before, the WC are going to be 3 coordinates x,y,z and:
+
+we can use the following formula.
+
+_wx_ = _px_ - (_d6_+_l_) \* _n\_x_
+
+_wy_ = _py_ - (_d6_+_l_) \* _n\_y_
+
+_wz_ = _pz_ - (_d6_+_l_) \* _n\_z_
+
+
+  * _n\_x_, _n\_y_, _n\_z_ = ROT_EE
+
+  * _d6_ value in table is 0
+
+  * _l_ is 0.303
+
+So, in the code, I've written:
+
+```
+            EE = Matrix([[px],
+                         [py],
+                         [pz]])
+
+            WC = EE - (0.303) * ROT_EE[:,2] # wrist center
+```
+
+
+* Sides and angles in the triangle
+
+```
+            side_a = 1.501
+            side_b = sqrt(pow((sqrt(WC[0]*WC[0] + WC[1]*WC[1]) - 0.35), 2) + pow((WC[2] - 0.75), 2))
+            side_c = 1.25
+
+            angle_a = acos((side_b * side_b + side_c * side_c - side_a * side_a) / (2 * side_b * side_c))
+            angle_b = acos((side_a * side_a + side_c * side_c - side_b * side_b) / (2 * side_a * side_c))
+            angle_c = acos((side_a * side_a + side_b * side_b - side_c * side_c) / (2 * side_a * side_b))
+```
+
+* Theta 1
+
+```
+            theta1 = atan2(WC[1],WC[0])
+```
+
+
+* Theta 2
+```
+            theta2 = pi / 2 - angle_a - atan2(WC[2] - 0.75, sqrt(WC[0] * WC[0] + WC[1] * WC[1]) - 0.35)
+```
+
+
+* Theta 3
+```
+            theta3 = pi / 2 - (angle_b + 0.036)  # sag in link 4 -0.054m
+```
 
